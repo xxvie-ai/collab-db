@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -556,8 +557,34 @@
         庫存管理
         <span class="owner-tag">負責人：CJ</span>
       </div>
-      <button class="btn-add" onclick="openModal('inventory')">＋ 新增品項</button>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="btn-add" style="background:var(--surface2);border:1px solid var(--border);color:var(--text2);" onclick="exportInventoryCSV()">⬇ 匯出 CSV</button>
+        <button class="btn-add" onclick="openModal('inventory')">＋ 新增品項</button>
+      </div>
     </div>
+
+    <!-- 統計卡片 -->
+    <div class="stats-row" id="inv-stats" style="display:none;margin-bottom:18px;">
+      <div class="stat-card">
+        <div class="stat-label">總品項數</div>
+        <div class="stat-value accent" id="inv-stat-count">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">總庫存量</div>
+        <div class="stat-value green" id="inv-stat-qty">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">庫存總成本</div>
+        <div class="stat-value amber" id="inv-stat-cost">$0</div>
+      </div>
+    </div>
+
+    <!-- 搜尋列 -->
+    <div style="margin-bottom:14px;">
+      <input id="inv-search" class="field-input" style="margin:0;max-width:320px;font-family:var(--sans);"
+        placeholder="🔍 搜尋品名或 SKU…" oninput="renderInventory()" />
+    </div>
+
     <div class="table-wrap">
       <table>
         <thead>
@@ -576,6 +603,9 @@
           <tr><td colspan="8"><div class="empty-state">載入中…</div></td></tr>
         </tbody>
       </table>
+    </div>
+    <div style="margin-top:8px;font-size:12px;color:var(--text3);">
+      🔴 數量低於 10 時會標示警示
     </div>
   </div>
 
@@ -908,13 +938,40 @@ function updateBadges() {
 
 function renderInventory() {
   const tbody = document.getElementById('inventory-tbody');
-  const rows = DB.inventory || [];
-  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state">尚無庫存資料，點右上角新增</div></td></tr>'; return; }
-  tbody.innerHTML = rows.map(r => `
-    <tr>
-      <td>${esc(r.name)}</td>
+  const keyword = (document.getElementById('inv-search')?.value || '').toLowerCase();
+  let rows = DB.inventory || [];
+
+  // 搜尋篩選
+  if (keyword) {
+    rows = rows.filter(r =>
+      (r.name||'').toLowerCase().includes(keyword) ||
+      (r.sku||'').toLowerCase().includes(keyword)
+    );
+  }
+
+  // 統計卡片
+  const all = DB.inventory || [];
+  if (all.length) {
+    document.getElementById('inv-stats').style.display = 'grid';
+    document.getElementById('inv-stat-count').textContent = all.length;
+    document.getElementById('inv-stat-qty').textContent   = fmtNum(all.reduce((s,r) => s + (Number(r.quantity)||0), 0));
+    document.getElementById('inv-stat-cost').textContent  = '$' + fmtNum(all.reduce((s,r) => s + (Number(r.quantity)||0)*(Number(r.cost)||0), 0));
+  }
+
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state">' + (keyword ? '找不到符合的品項' : '尚無庫存資料，點右上角新增') + '</div></td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows.map(r => {
+    const lowStock = Number(r.quantity) < 10;
+    const qtyStyle = lowStock ? 'color:var(--red);font-weight:700;' : '';
+    const rowStyle = lowStock ? 'background:rgba(244,91,105,0.06);' : '';
+    return `
+    <tr style="${rowStyle}">
+      <td>${esc(r.name)}${lowStock ? ' <span style="font-size:11px;color:var(--red);">⚠ 低庫存</span>' : ''}</td>
       <td class="cell-mono">${esc(r.sku||'—')}</td>
-      <td class="cell-number">${fmtNum(r.quantity)}</td>
+      <td class="cell-number" style="${qtyStyle}">${fmtNum(r.quantity)}</td>
       <td>${esc(r.unit||'—')}</td>
       <td class="cell-number">$${fmtNum(r.cost||0)}</td>
       <td class="cell-mono">${esc(r.updated_by||'—')}</td>
@@ -923,7 +980,23 @@ function renderInventory() {
         <button class="btn-icon" onclick="editInventory('${r.id}')">✏</button>
         <button class="btn-icon del" onclick="deleteRow('inventory','${r.id}')">✕</button>
       </div></td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
+}
+
+function exportInventoryCSV() {
+  const rows = DB.inventory || [];
+  if (!rows.length) { toast('沒有資料可以匯出', 'error'); return; }
+  const header = ['品名','SKU','數量','單位','成本','更新者','更新時間'];
+  const lines = [header.join(','), ...rows.map(r =>
+    [r.name, r.sku||'', r.quantity, r.unit||'', r.cost||0, r.updated_by||'', fmtDate(r.updated_at)].map(v => `"${v}"`).join(',')
+  )];
+  const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '庫存清單_' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+  toast('CSV 匯出成功', 'success');
 }
 
 function renderTransactions() {
